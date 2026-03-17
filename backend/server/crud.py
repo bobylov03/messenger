@@ -63,7 +63,8 @@ async def get_user_chats(db: AsyncSession, user_id: int):
             .filter(ChatParticipant.user_id == user_id)
             .order_by(Chat.created_at.desc())
             .options(
-                selectinload(Chat.participants).selectinload(ChatParticipant.user)
+                selectinload(Chat.participants).selectinload(ChatParticipant.user),
+                selectinload(Chat.pinned_messages)
             )
         )
         chats = result.scalars().all()
@@ -127,7 +128,8 @@ async def get_chat_by_id(db: AsyncSession, chat_id: int):
         select(Chat)
         .filter(Chat.id == chat_id)
         .options(
-            selectinload(Chat.participants).selectinload(ChatParticipant.user)
+            selectinload(Chat.participants).selectinload(ChatParticipant.user),
+            selectinload(Chat.pinned_messages)
         )
     )
     return result.scalar_one_or_none()

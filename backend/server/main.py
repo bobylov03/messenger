@@ -1036,8 +1036,8 @@ async def create_new_chat(
         await db.commit()
         logger.info(f"✅ Chat created successfully: {chat.id}")
         
-        # Загружаем участников
-        await db.refresh(chat, ["participants"])
+        # Загружаем связанные данные
+        await db.refresh(chat, ["participants", "pinned_messages"])
         for p in chat.participants:
             await db.refresh(p, ["user"])
 
