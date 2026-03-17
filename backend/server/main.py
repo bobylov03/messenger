@@ -513,17 +513,16 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
                     ws_logger.info(f"Ping failed, disconnecting")
                     break
                     
-    except WebSocketDisconnect:
-        ws_logger.info(f"Disconnected")
+    except (WebSocketDisconnect, RuntimeError) as e:
+        ws_logger.info(f"Disconnected: {e}")
         was_active = await manager.disconnect(websocket, user_id)
 
         if was_active:
-            # Обновляем статус только если это было активное соединение
             try:
                 await update_user_status(db, user_id, False)
                 await db.commit()
-            except Exception as e:
-                ws_logger.error(f"Error updating user status on disconnect: {e}")
+            except Exception as ex:
+                ws_logger.error(f"Error updating user status on disconnect: {ex}")
 
             asyncio.create_task(notify_user_offline(user_id))
 

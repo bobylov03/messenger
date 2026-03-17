@@ -168,40 +168,49 @@ export const useWebSocket = () => {
       };
 
       ws.onclose = (event) => {
-        console.log('🔌 WebSocket disconnected:', event.code, event.reason);
-        setIsConnected(false);
+        console.log('WebSocket disconnected:', event.code, event.reason);
         clearPingInterval();
-        
-        if (wsRef.current === ws) {
-          wsRef.current = null;
-        }
-        
         connectionInProgressRef.current = false;
-        
-        // Показываем уведомление о разрыве соединения
-        if (event.code !== 1000) {
-          toast.error('Соединение потеряно. Переподключение...', { id: 'ws-disconnected' });
+
+        // Если wsRef уже указывает на другой WS — значит это старое соединение,
+        // новое уже активно. Не нужно реконнектиться.
+        if (wsRef.current !== ws) {
+          console.log('Old WebSocket closed, new one already active');
+          return;
         }
-        
+
+        wsRef.current = null;
+        setIsConnected(false);
+
+        // Не реконнектимся если закрытие было нормальным (code 1000)
+        if (event.code === 1000) {
+          console.log('WebSocket closed normally');
+          return;
+        }
+
+        // Показываем уведомление о разрыве соединения
+        toast.error('Соединение потеряно. Переподключение...', { id: 'ws-disconnected' });
+
         // Попытка переподключения с экспоненциальной задержкой
         if (user && token) {
           const delay = Math.min(1000 * Math.pow(1.5, connectionAttempts), 10000);
           setConnectionAttempts(prev => prev + 1);
-          
+
           clearReconnectTimeout();
           reconnectTimeoutRef.current = setTimeout(() => {
             connectionInProgressRef.current = false;
             connect();
           }, delay);
-          console.log(`🔄 Reconnecting in ${delay}ms (attempt ${connectionAttempts + 1})`);
+          console.log(`Reconnecting in ${delay}ms (attempt ${connectionAttempts + 1})`);
         }
       };
 
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+        console.error('WebSocket error:', error);
         connectionInProgressRef.current = false;
       };
 
+      // Сохраняем ссылку сразу, чтобы onclose мог сравнить
       wsRef.current = ws;
     } catch (error) {
       console.error('❌ Failed to create WebSocket connection:', error);
@@ -670,12 +679,13 @@ export const useWebSocket = () => {
   }, []);
 
   // Автоматическое подключение при изменении user/token
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (user && token) {
       const timeoutId = setTimeout(() => {
         connect();
       }, 500);
-      
+
       return () => {
         clearTimeout(timeoutId);
         disconnect();
@@ -684,12 +694,12 @@ export const useWebSocket = () => {
     } else {
       disconnect();
     }
-    
+
     return () => {
       disconnect();
       clearReconnectTimeout();
     };
-  }, [user, token, connect, disconnect, clearReconnectTimeout]);
+  }, [user?.id, token]);
 
   // Автоматическая подписка на активный чат
   useEffect(() => {
