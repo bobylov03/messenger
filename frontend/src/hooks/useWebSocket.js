@@ -521,9 +521,7 @@ export const WebSocketProvider = ({ children }) => {
     } else {
       disconnect();
     }
-    // Зависим только от примитивов
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, token]);
+  }, [user?.id, token, connect, disconnect]);
 
   // Подписка на активный чат
   useEffect(() => {
@@ -544,8 +542,7 @@ export const WebSocketProvider = ({ children }) => {
         pendingSubscriptionsRef.current.delete(chatId);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, activeChat?.id]);
+  }, [isConnected, activeChat?.id, subscribeToChat, sendJsonMessage]);
 
   // Обработчики звонков
   useEffect(() => {
