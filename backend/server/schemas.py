@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -106,10 +106,11 @@ class MessageResponse(BaseModel):
     reply_to_message: Optional['MessagePreview'] = None
     forwarded_from_message: Optional['MessagePreview'] = None
     sender: Optional[UserResponse] = None
-    metadata: Optional[Dict[str, Any]] = None
-    
+    metadata: Optional[Dict[str, Any]] = Field(None, alias="message_metadata")
+
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 class MessagePreview(BaseModel):
     id: int
