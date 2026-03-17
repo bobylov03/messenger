@@ -987,14 +987,10 @@ async def create_new_chat(
         logger.info(f"✅ Chat created successfully: {chat.id}")
         
         # Загружаем участников
-        result = await db.execute(
-            select(ChatParticipant)
-            .filter(ChatParticipant.chat_id == chat.id)
-            .options(selectinload(ChatParticipant.user))
-        )
-        participants = result.scalars().all()
-        chat.participants = participants
-        
+        await db.refresh(chat, ["participants"])
+        for p in chat.participants:
+            await db.refresh(p, ["user"])
+
         return ChatResponse.from_orm(chat)
     except Exception as e:
         logger.error(f"❌ Error creating chat: {e}", exc_info=True)
