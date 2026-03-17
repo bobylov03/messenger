@@ -25,11 +25,14 @@ export const useWebSocket = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const connectionAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef(null);
   const pendingSubscriptionsRef = useRef(new Set());
   const connectionInProgressRef = useRef(false);
   const messageQueueRef = useRef([]); // Очередь сообщений
   const pingIntervalRef = useRef(null);
+  const connectRef = useRef(null);
+  const disconnectRef = useRef(null);
   
   const dispatch = useDispatch();
   const { user, token } = useSelector(state => state.auth);
@@ -95,6 +98,7 @@ export const useWebSocket = () => {
         console.log('✅ WebSocket connected successfully');
         setIsConnected(true);
         setConnectionAttempts(0);
+        connectionAttemptsRef.current = 0;
         clearReconnectTimeout();
         connectionInProgressRef.current = false;
         wsRef.current = ws;
@@ -193,15 +197,17 @@ export const useWebSocket = () => {
 
         // Попытка переподключения с экспоненциальной задержкой
         if (user && token) {
-          const delay = Math.min(1000 * Math.pow(1.5, connectionAttempts), 10000);
-          setConnectionAttempts(prev => prev + 1);
+          const attempts = connectionAttemptsRef.current;
+          const delay = Math.min(1000 * Math.pow(1.5, attempts), 10000);
+          connectionAttemptsRef.current = attempts + 1;
+          setConnectionAttempts(attempts + 1);
 
           clearReconnectTimeout();
           reconnectTimeoutRef.current = setTimeout(() => {
             connectionInProgressRef.current = false;
             connect();
           }, delay);
-          console.log(`Reconnecting in ${delay}ms (attempt ${connectionAttempts + 1})`);
+          console.log(`Reconnecting in ${delay}ms (attempt ${attempts + 1})`);
         }
       };
 
@@ -217,7 +223,7 @@ export const useWebSocket = () => {
       setIsConnected(false);
       connectionInProgressRef.current = false;
     }
-  }, [user, token, connectionAttempts, clearReconnectTimeout, clearPingInterval, processMessageQueue]);
+  }, [user, token, clearReconnectTimeout, clearPingInterval, processMessageQueue]);
 
   const sendJsonMessage = useCallback((data, retryCount = 0) => {
     // Проверяем наличие WebSocket
@@ -421,9 +427,14 @@ export const useWebSocket = () => {
     connectionInProgressRef.current = false;
   }, [clearReconnectTimeout, clearPingInterval]);
 
+  // Обновляем refs при каждом рендере
+  connectRef.current = connect;
+  disconnectRef.current = disconnect;
+
   const reconnect = useCallback(() => {
     disconnect();
     setConnectionAttempts(0);
+    connectionAttemptsRef.current = 0;
     setTimeout(() => {
       connectionInProgressRef.current = false;
       connect();
@@ -679,25 +690,22 @@ export const useWebSocket = () => {
   }, []);
 
   // Автоматическое подключение при изменении user/token
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (user && token) {
       const timeoutId = setTimeout(() => {
-        connect();
+        connectRef.current();
       }, 500);
 
       return () => {
         clearTimeout(timeoutId);
-        disconnect();
-        clearReconnectTimeout();
+        disconnectRef.current();
       };
     } else {
-      disconnect();
+      disconnectRef.current();
     }
 
     return () => {
-      disconnect();
-      clearReconnectTimeout();
+      disconnectRef.current();
     };
   }, [user?.id, token]);
 
