@@ -186,16 +186,18 @@ export const useWebSocket = () => {
         wsRef.current = null;
         setIsConnected(false);
 
-        // Не реконнектимся если закрытие было нормальным (code 1000)
-        if (event.code === 1000) {
-          console.log('WebSocket closed normally');
+        // 4000 = сервер заменил соединение новым от того же юзера.
+        // Не реконнектимся — другая вкладка/сессия уже подключена.
+        if (event.code === 4000) {
+          console.log('Connection replaced by new session');
           return;
         }
 
-        // Показываем уведомление о разрыве соединения
-        toast.error('Соединение потеряно. Переподключение...', { id: 'ws-disconnected' });
+        // Для всех остальных кодов (включая 1000) — пытаемся переподключиться
+        if (event.code !== 1000) {
+          toast.error('Соединение потеряно. Переподключение...', { id: 'ws-disconnected' });
+        }
 
-        // Попытка переподключения с экспоненциальной задержкой
         if (user && token) {
           const attempts = connectionAttemptsRef.current;
           const delay = Math.min(1000 * Math.pow(1.5, attempts), 10000);

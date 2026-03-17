@@ -180,7 +180,7 @@ class ConnectionManager:
         # Закрываем старое соединение ВНЕ лока, чтобы избежать deadlock
         if old_ws is not None:
             try:
-                await old_ws.close(code=1000, reason="New connection established")
+                await old_ws.close(code=4000, reason="New connection established")
             except Exception:
                 pass
 
