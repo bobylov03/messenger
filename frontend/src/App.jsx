@@ -8,6 +8,7 @@ import MainLayout from './components/Layout/MainLayout';
 import ChatPage from './pages/ChatPage';
 import SettingsPage from './pages/SettingsPage';
 import CallModal from './components/Calls/CallModal';
+import { WebSocketProvider } from './hooks/useWebSocket';
 
 function App() {
   const { token } = useSelector(state => state.auth);
@@ -35,7 +36,7 @@ function App() {
   };
 
   return (
-    <>
+    <WebSocketProvider>
       <Toaster position="top-right" />
       <Routes>
         <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
@@ -56,7 +57,7 @@ function App() {
           }}
         />
       )}
-    </>
+    </WebSocketProvider>
   );
 }
 

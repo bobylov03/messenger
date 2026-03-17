@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useCallback, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   addMessage,
@@ -14,19 +14,24 @@ import {
   setIncomingCall,
   setActiveCall,
   addNotification,
-  markMessagesAsRead,
+  markMessagesAsRead as markMessagesAsReadAction,
   setUserOnline,
   setUserOffline
 } from '../store/chatSlice';
 import toast from 'react-hot-toast';
 
-export const useWebSocket = () => {
+// ============ Context ============
+
+const WebSocketContext = createContext(null);
+
+// ============ Provider (единственное соединение на всё приложение) ============
+
+export const WebSocketProvider = ({ children }) => {
   const wsRef = useRef(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
 
-  // Все мутабельные значения — в refs, чтобы коллбэки не зависели от state/props
   const connectionAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef(null);
   const pendingSubscriptionsRef = useRef(new Set());
@@ -41,12 +46,12 @@ export const useWebSocket = () => {
   const { user, token } = useSelector(state => state.auth);
   const { activeChat } = useSelector(state => state.chat);
 
-  // Синхронизируем refs с текущими значениями
+  // Синхронизируем refs
   userRef.current = user;
   tokenRef.current = token;
   activeChatRef.current = activeChat;
 
-  // === Утилиты (стабильные, без зависимостей) ===
+  // === Стабильные утилиты ===
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -90,7 +95,7 @@ export const useWebSocket = () => {
     }
   }, []);
 
-  // === handleWebSocketMessage — читает из refs ===
+  // === Обработка входящих сообщений ===
 
   const handleWebSocketMessage = useCallback((data) => {
     const currentUser = userRef.current;
@@ -196,7 +201,7 @@ export const useWebSocket = () => {
         }));
         break;
       case 'messages_read':
-        dispatch(markMessagesAsRead({
+        dispatch(markMessagesAsReadAction({
           chatId: data.chat_id,
           messageIds: data.message_ids || [data.last_read_message_id]
         }));
@@ -259,12 +264,10 @@ export const useWebSocket = () => {
         }
         break;
       case 'connected':
-        break;
       case 'subscribed':
         pendingSubscriptionsRef.current.delete(data.chat_id);
         break;
       case 'unsubscribed':
-        break;
       case 'delete_success':
       case 'edit_success':
       case 'reaction_added':
@@ -279,7 +282,7 @@ export const useWebSocket = () => {
     }
   }, [dispatch, playCallSound, stopCallSound]);
 
-  // === connect — полностью стабильный, читает всё из refs ===
+  // === connect ===
 
   const connect = useCallback(() => {
     const currentUser = userRef.current;
@@ -289,7 +292,6 @@ export const useWebSocket = () => {
     if (connectionInProgressRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    // Закрываем предыдущий WS в состоянии CONNECTING, чтобы не плодить параллельные
     if (wsRef.current?.readyState === WebSocket.CONNECTING) {
       wsRef.current.close();
       wsRef.current = null;
@@ -309,12 +311,10 @@ export const useWebSocket = () => {
         connectionInProgressRef.current = false;
         wsRef.current = ws;
 
-        // Отправляем статус онлайн
         try {
           ws.send(JSON.stringify({ type: 'status', is_online: true }));
         } catch (e) { /* ignore */ }
 
-        // Подписываемся на ожидающие чаты
         pendingSubscriptionsRef.current.forEach(chatId => {
           try {
             ws.send(JSON.stringify({ type: 'subscribe', chat_id: chatId }));
@@ -322,7 +322,6 @@ export const useWebSocket = () => {
         });
         pendingSubscriptionsRef.current.clear();
 
-        // Ping каждые 25 секунд
         clearPingInterval();
         pingIntervalRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
@@ -350,16 +349,13 @@ export const useWebSocket = () => {
         clearPingInterval();
         connectionInProgressRef.current = false;
 
-        // Старое соединение — новый WS уже активен
         if (wsRef.current !== ws) return;
 
         wsRef.current = null;
         setIsConnected(false);
 
-        // 4000 = сервер заменил соединение (другая вкладка/сессия)
         if (event.code === 4000) return;
 
-        // Переподключение
         if (event.code !== 1000) {
           toast.error('Соединение потеряно. Переподключение...', { id: 'ws-disconnected' });
         }
@@ -390,7 +386,7 @@ export const useWebSocket = () => {
     }
   }, [clearReconnectTimeout, clearPingInterval, processMessageQueue, handleWebSocketMessage]);
 
-  // === disconnect — стабильный ===
+  // === disconnect ===
 
   const disconnect = useCallback(() => {
     clearReconnectTimeout();
@@ -413,7 +409,7 @@ export const useWebSocket = () => {
     connectionInProgressRef.current = false;
   }, [clearReconnectTimeout, clearPingInterval, stopCallSound]);
 
-  // === sendJsonMessage — стабильный, не зависит от connect ===
+  // === sendJsonMessage ===
 
   const sendJsonMessage = useCallback((data) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -435,6 +431,8 @@ export const useWebSocket = () => {
       return false;
     }
   }, []);
+
+  // === Вспомогательные функции отправки ===
 
   const subscribeToChat = useCallback((chatId) => {
     if (!chatId) return false;
@@ -471,7 +469,7 @@ export const useWebSocket = () => {
     return sendJsonMessage({ type: 'remove_reaction', message_id: messageId, reaction });
   }, [sendJsonMessage]);
 
-  const markAsRead = useCallback((chatId, messageIds) => {
+  const markMessagesAsRead = useCallback((chatId, messageIds) => {
     if (!messageIds || messageIds.length === 0) return false;
     return sendJsonMessage({
       type: 'read_messages',
@@ -523,42 +521,47 @@ export const useWebSocket = () => {
     } else {
       disconnect();
     }
-  }, [user?.id, token, connect, disconnect]);
+    // Зависим только от примитивов
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, token]);
 
   // Подписка на активный чат
   useEffect(() => {
-    if (!activeChat) return;
+    if (!activeChat?.id) return;
+
+    const chatId = activeChat.id;
 
     if (isConnected) {
-      subscribeToChat(activeChat.id);
+      subscribeToChat(chatId);
     } else {
-      pendingSubscriptionsRef.current.add(activeChat.id);
+      pendingSubscriptionsRef.current.add(chatId);
     }
 
     return () => {
-      if (isConnected) {
-        unsubscribeFromChat(activeChat.id);
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        sendJsonMessage({ type: 'unsubscribe', chat_id: chatId });
       } else {
-        pendingSubscriptionsRef.current.delete(activeChat.id);
+        pendingSubscriptionsRef.current.delete(chatId);
       }
     };
-  }, [isConnected, activeChat?.id, subscribeToChat, unsubscribeFromChat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, activeChat?.id]);
 
   // Обработчики звонков
   useEffect(() => {
-    const handleAcceptCall = (event) => acceptCall(event.detail.call_id);
-    const handleRejectCall = (event) => rejectCall(event.detail.call_id);
+    const handleAcceptCallEvent = (event) => acceptCall(event.detail.call_id);
+    const handleRejectCallEvent = (event) => rejectCall(event.detail.call_id);
 
-    window.addEventListener('accept_call', handleAcceptCall);
-    window.addEventListener('reject_call', handleRejectCall);
+    window.addEventListener('accept_call', handleAcceptCallEvent);
+    window.addEventListener('reject_call', handleRejectCallEvent);
 
     return () => {
-      window.removeEventListener('accept_call', handleAcceptCall);
-      window.removeEventListener('reject_call', handleRejectCall);
+      window.removeEventListener('accept_call', handleAcceptCallEvent);
+      window.removeEventListener('reject_call', handleRejectCallEvent);
     };
   }, [acceptCall, rejectCall]);
 
-  return {
+  const value = {
     sendJsonMessage,
     sendMessage,
     sendTyping,
@@ -566,7 +569,7 @@ export const useWebSocket = () => {
     deleteMessage,
     addReaction,
     removeReaction,
-    markMessagesAsRead: markAsRead,
+    markMessagesAsRead,
     subscribeToChat,
     unsubscribeFromChat,
     startCall,
@@ -582,56 +585,37 @@ export const useWebSocket = () => {
     reconnect,
     wsRef
   };
+
+  return (
+    <WebSocketContext.Provider value={value}>
+      {children}
+    </WebSocketContext.Provider>
+  );
+};
+
+// ============ Хуки-потребители (просто читают из контекста) ============
+
+export const useWebSocket = () => {
+  const context = useContext(WebSocketContext);
+  if (!context) {
+    throw new Error('useWebSocket must be used within a WebSocketProvider');
+  }
+  return context;
 };
 
 export const useWebSocketConnection = () => {
-  const {
-    sendJsonMessage,
-    sendMessage,
-    sendTyping,
-    editMessage,
-    deleteMessage,
-    addReaction,
-    removeReaction,
-    markMessagesAsRead,
-    subscribeToChat,
-    unsubscribeFromChat,
-    startCall,
-    acceptCall,
-    rejectCall,
-    endCall,
-    sendWebRTCSignal,
-    isConnected,
-    lastMessage
-  } = useWebSocket();
-
+  const ctx = useWebSocket();
   return {
-    sendJsonMessage,
-    sendMessage,
-    sendTyping,
-    editMessage,
-    deleteMessage,
-    addReaction,
-    removeReaction,
-    markMessagesAsRead,
-    subscribeToChat,
-    unsubscribeFromChat,
-    startCall,
-    acceptCall,
-    rejectCall,
-    endCall,
-    sendWebRTCSignal,
-    isConnected,
-    lastMessage,
-    send: sendJsonMessage,
-    wsSend: sendJsonMessage,
-    wsSendMessage: sendMessage,
-    wsEditMessage: editMessage,
-    wsDeleteMessage: deleteMessage,
-    wsAddReaction: addReaction,
-    wsRemoveReaction: removeReaction,
-    wsSubscribe: subscribeToChat,
-    wsUnsubscribe: unsubscribeFromChat,
-    wsMarkAsRead: markMessagesAsRead
+    ...ctx,
+    send: ctx.sendJsonMessage,
+    wsSend: ctx.sendJsonMessage,
+    wsSendMessage: ctx.sendMessage,
+    wsEditMessage: ctx.editMessage,
+    wsDeleteMessage: ctx.deleteMessage,
+    wsAddReaction: ctx.addReaction,
+    wsRemoveReaction: ctx.removeReaction,
+    wsSubscribe: ctx.subscribeToChat,
+    wsUnsubscribe: ctx.unsubscribeFromChat,
+    wsMarkAsRead: ctx.markMessagesAsRead
   };
 };
