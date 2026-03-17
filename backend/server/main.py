@@ -163,62 +163,65 @@ class ConnectionManager:
         self.logger.setLevel(logging.INFO)
     
     async def connect(self, websocket: WebSocket, user_id: int):
+        await websocket.accept()
+
+        old_ws = None
         async with self._lock:
-            # СНАЧАЛА принимаем соединение
-            await websocket.accept()
-            
-            # Закрываем существующее соединение если есть
+            # Запоминаем старое соединение для закрытия вне лока
             if user_id in self.active_connections:
-                try:
-                    old_ws = self.active_connections[user_id]
-                    await old_ws.close(code=1000, reason="New connection established")
-                    self.logger.info(f"🔄 Closed existing connection for user {user_id}")
-                except:
-                    pass
-            
+                old_ws = self.active_connections[user_id]
+
             self.active_connections[user_id] = websocket
             self.user_chats[user_id] = []
             self.user_last_seen[user_id] = datetime.utcnow()
-            
-            self.logger.info(f"✅ User {user_id} connected (total: {len(self.active_connections)})")
-            
-            # Отправляем приветственное сообщение
+
+            self.logger.info(f"User {user_id} connected (total: {len(self.active_connections)})")
+
+        # Закрываем старое соединение ВНЕ лока, чтобы избежать deadlock
+        if old_ws is not None:
             try:
-                await websocket.send_json({
-                    "type": "connected",
-                    "user_id": user_id,
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-            except Exception as e:
-                self.logger.error(f"Error sending welcome message to user {user_id}: {e}")
+                await old_ws.close(code=1000, reason="New connection established")
+            except Exception:
+                pass
+
+        # Отправляем приветственное сообщение
+        try:
+            await websocket.send_json({
+                "type": "connected",
+                "user_id": user_id,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            self.logger.error(f"Error sending welcome message to user {user_id}: {e}")
     
-    async def disconnect(self, user_id: int):
+    async def disconnect(self, websocket: WebSocket, user_id: int):
         async with self._lock:
-            if user_id in self.active_connections:
-                # Пытаемся закрыть соединение
-                try:
-                    await self.active_connections[user_id].close()
-                except:
-                    pass
+            # Удаляем ТОЛЬКО если это тот же самый websocket (не новый)
+            if user_id in self.active_connections and self.active_connections[user_id] is websocket:
                 del self.active_connections[user_id]
-            
-            if user_id in self.user_chats:
-                del self.user_chats[user_id]
-            if user_id in self.user_last_seen:
-                del self.user_last_seen[user_id]
-            
-            self.logger.info(f"🔌 User {user_id} disconnected (remaining: {len(self.active_connections)})")
+
+                if user_id in self.user_chats:
+                    del self.user_chats[user_id]
+                if user_id in self.user_last_seen:
+                    del self.user_last_seen[user_id]
+
+                self.logger.info(f"User {user_id} disconnected (remaining: {len(self.active_connections)})")
+                return True
+            return False
     
     async def send_personal_message(self, message: dict, user_id: int) -> bool:
         """Отправляет сообщение конкретному пользователю"""
         if user_id not in self.active_connections:
             return False
-        
+
         try:
             await self.active_connections[user_id].send_json(message)
             return True
-        except Exception as e:
-            self.logger.error(f"Error sending message to user {user_id}: {e}")
+        except Exception:
+            # Удаляем мёртвое соединение
+            self.active_connections.pop(user_id, None)
+            self.user_chats.pop(user_id, None)
+            self.user_last_seen.pop(user_id, None)
             return False
     
     async def broadcast_to_chat(self, message: dict, chat_id: int, db: AsyncSession, exclude_user_id: Optional[int] = None):
@@ -512,21 +515,21 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
                     
     except WebSocketDisconnect:
         ws_logger.info(f"Disconnected")
-        await manager.disconnect(user_id)
-        
-        # Обновляем статус пользователя на оффлайн
-        try:
-            await update_user_status(db, user_id, False)
-            await db.commit()
-        except Exception as e:
-            ws_logger.error(f"Error updating user status on disconnect: {e}")
-        
-        # Уведомляем чаты оффлайн (без ожидания)
-        asyncio.create_task(notify_user_offline(user_id))
-            
+        was_active = await manager.disconnect(websocket, user_id)
+
+        if was_active:
+            # Обновляем статус только если это было активное соединение
+            try:
+                await update_user_status(db, user_id, False)
+                await db.commit()
+            except Exception as e:
+                ws_logger.error(f"Error updating user status on disconnect: {e}")
+
+            asyncio.create_task(notify_user_offline(user_id))
+
     except Exception as e:
-        ws_logger.error(f"❌ Error: {e}")
-        await manager.disconnect(user_id)
+        ws_logger.error(f"Error: {e}")
+        await manager.disconnect(websocket, user_id)
     finally:
         await db.close()
 
