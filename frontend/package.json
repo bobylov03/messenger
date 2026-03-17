@@ -1,0 +1,48 @@
+{
+  "name": "company-messenger-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@reduxjs/toolkit": "^2.0.1",
+    "axios": "^1.6.7",
+    "date-fns": "^2.30.0",
+    "emoji-picker-react": "^4.4.11",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-dropzone": "^14.2.3",
+    "react-h5-audio-player": "^3.10.0",
+    "react-hot-toast": "^2.4.1",
+    "react-icons": "^4.12.0",
+    "react-player": "^2.16.0",
+    "react-redux": "^9.0.4",
+    "react-router-dom": "^6.20.0",
+    "simple-peer": "^9.11.1",
+    "socket.io-client": "^4.7.2",
+    "wavesurfer.js": "^7.12.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "ajv": "^8.12.0",
+    "ajv-keywords": "^5.1.0",
+    "react-scripts": "^5.0.1"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
