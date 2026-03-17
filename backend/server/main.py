@@ -232,16 +232,25 @@ class ConnectionManager:
             
             sent_count = 0
             
+            dead_connections = []
+
             for user_id in user_ids:
                 if exclude_user_id and user_id == exclude_user_id:
                     continue
-                
+
                 if user_id in self.active_connections:
                     try:
                         await self.active_connections[user_id].send_json(message)
                         sent_count += 1
                     except Exception as e:
-                        self.logger.error(f"Error broadcasting to user {user_id}: {e}")
+                        self.logger.warning(f"Dead connection for user {user_id}, removing")
+                        dead_connections.append(user_id)
+
+            # Удаляем мёртвые соединения
+            for user_id in dead_connections:
+                self.active_connections.pop(user_id, None)
+                self.user_chats.pop(user_id, None)
+                self.user_last_seen.pop(user_id, None)
             
             if sent_count > 0:
                 self.logger.info(f"📢 Broadcast to chat {chat_id}: sent to {sent_count}/{len(user_ids)} users")
@@ -525,14 +534,31 @@ async def notify_user_offline(user_id: int):
     """Уведомляет чаты о том, что пользователь оффлайн"""
     try:
         async with AsyncSessionLocal() as db:
-            user_chats = await get_user_chats(db, user_id)
-            for chat in user_chats:
-                await manager.broadcast_to_chat({
-                    "type": "user_status",
-                    "user_id": user_id,
-                    "is_online": False,
-                    "last_seen": datetime.utcnow().isoformat()
-                }, chat.id, db)
+            result = await db.execute(
+                select(ChatParticipant.user_id)
+                .filter(
+                    ChatParticipant.chat_id.in_(
+                        select(ChatParticipant.chat_id).filter(ChatParticipant.user_id == user_id)
+                    ),
+                    ChatParticipant.user_id != user_id
+                )
+                .distinct()
+            )
+            peer_user_ids = result.scalars().all()
+
+            status_message = {
+                "type": "user_status",
+                "user_id": user_id,
+                "is_online": False,
+                "last_seen": datetime.utcnow().isoformat()
+            }
+
+            for peer_id in peer_user_ids:
+                if peer_id in manager.active_connections:
+                    try:
+                        await manager.active_connections[peer_id].send_json(status_message)
+                    except Exception:
+                        manager.active_connections.pop(peer_id, None)
     except Exception as e:
         logger.error(f"Error notifying user {user_id} offline: {e}")
 
@@ -777,27 +803,51 @@ async def handle_remove_reaction(data, user_id, db):
 async def handle_status(data, user_id, db):
     try:
         is_online = data.get("is_online", True)
-        
+
         # Обновляем статус
         await update_user_status(db, user_id, is_online)
         await db.commit()
-        
-        # Получаем все чаты пользователя
+
+        # Находим всех пользователей, которые состоят в тех же чатах (одним запросом)
         try:
-            user_chats = await get_user_chats(db, user_id)
-            # Отправляем уведомления
-            for chat in user_chats:
-                await manager.broadcast_to_chat({
-                    "type": "user_status",
-                    "user_id": user_id,
-                    "is_online": is_online,
-                    "last_seen": datetime.utcnow().isoformat()
-                }, chat.id, db)
-            
-            logger.info(f"👤 User {user_id} status: {'online' if is_online else 'offline'}")
+            result = await db.execute(
+                select(ChatParticipant.user_id)
+                .filter(
+                    ChatParticipant.chat_id.in_(
+                        select(ChatParticipant.chat_id).filter(ChatParticipant.user_id == user_id)
+                    ),
+                    ChatParticipant.user_id != user_id
+                )
+                .distinct()
+            )
+            peer_user_ids = result.scalars().all()
+
+            status_message = {
+                "type": "user_status",
+                "user_id": user_id,
+                "is_online": is_online,
+                "last_seen": datetime.utcnow().isoformat()
+            }
+
+            # Отправляем статус каждому уникальному пользователю один раз
+            dead_connections = []
+            for peer_id in peer_user_ids:
+                if peer_id in manager.active_connections:
+                    try:
+                        await manager.active_connections[peer_id].send_json(status_message)
+                    except Exception:
+                        dead_connections.append(peer_id)
+
+            # Удаляем мёртвые соединения
+            for peer_id in dead_connections:
+                manager.active_connections.pop(peer_id, None)
+                manager.user_chats.pop(peer_id, None)
+                manager.user_last_seen.pop(peer_id, None)
+
+            logger.info(f"User {user_id} status: {'online' if is_online else 'offline'}")
         except Exception as e:
-            logger.error(f"Error getting user chats for status update: {e}")
-    
+            logger.error(f"Error broadcasting status update: {e}")
+
     except Exception as e:
         await db.rollback()
         logger.error(f"Error updating status: {e}")

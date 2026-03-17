@@ -145,7 +145,7 @@ class Settings:
     if ENVIRONMENT == "development":
         RELOAD: bool = True
         LOG_LEVEL = "DEBUG"
-        DATABASE_ECHO = True
+        DATABASE_ECHO = False
     else:
         RELOAD: bool = False
     
