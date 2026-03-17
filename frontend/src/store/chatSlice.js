@@ -987,15 +987,24 @@ const chatSlice = createSlice({
       .addCase(sendMessage.fulfilled, (state, action) => {
         const message = action.payload;
         const chatId = message.chat_id;
-        
-        // Заменяем оптимистичное сообщение
+
+        // Заменяем оптимистичное сообщение по temp_id
         if (state.messages[chatId]) {
-          const index = state.messages[chatId].findIndex(m => 
-            m.is_optimistic && m.content === message.content
+          const index = state.messages[chatId].findIndex(m =>
+            m.is_optimistic && (m.temp_id === message.temp_id || m.id === message.temp_id)
           );
-          
+
           if (index !== -1) {
             state.messages[chatId][index] = message;
+          } else {
+            // Если не нашли оптимистичное — добавляем как новое
+            const exists = state.messages[chatId].some(m => m.id === message.id);
+            if (!exists) {
+              state.messages[chatId].push(message);
+              state.messages[chatId].sort((a, b) =>
+                new Date(a.sent_at) - new Date(b.sent_at)
+              );
+            }
           }
         }
       })
